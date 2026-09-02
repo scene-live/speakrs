@@ -28,7 +28,9 @@ load-dynamic = ["ort/load-dynamic", "dep:libloading"]
 
 intel-mkl = ["dep:ndarray-linalg-mkl"]
 openblas-static = ["dep:ndarray-linalg-static"]
-openblas-system = ["dep:ndarray-linalg-system"]
+# bq-Meeting PoC ローカル改変: runner の target 別 dependency feature は Cargo により
+# 一つの speakrs package へ統合される。macOS/Windows で同じ alias を target 別に選ぶ。
+openblas-system = ["dep:ndarray-linalg-default"]
 
 _metrics = []
 
@@ -43,7 +45,6 @@ kodama = "0.3.0"
 ndarray = "0.17.2"
 ndarray-linalg-mkl = { package = "ndarray-linalg", version = "0.18.1", features = ["intel-mkl-static"], optional = true }
 ndarray-linalg-static = { package = "ndarray-linalg", version = "0.18.1", features = ["openblas-static"], optional = true }
-ndarray-linalg-system = { package = "ndarray-linalg", version = "0.18.1", features = ["openblas-system"], optional = true }
 ndarray-npy = "0.10.0"
 
 ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
@@ -59,13 +60,16 @@ thiserror = "2.0.18"
 crossbeam-channel = "0.5"
 rayon = "1.11.0"
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
+[target.'cfg(all(target_arch = "x86_64", not(target_os = "macos")))'.dependencies]
 ndarray-linalg-default = { package = "ndarray-linalg", version = "0.18.1", features = ["intel-mkl-static"], optional = true }
 
-[target.'cfg(not(target_arch = "x86_64"))'.dependencies]
+[target.'cfg(all(not(target_arch = "x86_64"), not(target_os = "macos")))'.dependencies]
 ndarray-linalg-default = { package = "ndarray-linalg", version = "0.18.1", features = ["openblas-static"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# bq-Meeting PoC ローカル改変: openblas-system/default-linalg の共有 alias は macOS では
+# Homebrew OpenBLAS を選び、Windows x86_64 では上記の Intel MKL 静的を選ぶ。
+ndarray-linalg-default = { package = "ndarray-linalg", version = "0.18.1", features = ["openblas-system"], optional = true }
 objc2 = { version = "0.6", optional = true }
 block2 = { version = "0.6", optional = true }
 objc2-core-ml = { version = "0.3", optional = true, features = [

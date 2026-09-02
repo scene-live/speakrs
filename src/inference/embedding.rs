@@ -39,7 +39,9 @@ use tensor::{
     preallocated_run_options,
 };
 
-const PRIMARY_BATCH_SIZE: usize = 64;
+// bq-Meeting PoC ローカル改変: 上流は64だが配布モデルに -tail-b64.onnx が存在せず、
+// 埋め込みのバッチ経路が常に無効化されていた。実在する -tail-b32.onnx に合わせる。
+const PRIMARY_BATCH_SIZE: usize = 32;
 const MULTI_MASK_BATCH_SIZE: usize = 32;
 const FBANK_BATCH_SIZE: usize = 32;
 const CHUNK_SPEAKER_BATCH_SIZE: usize = 3;

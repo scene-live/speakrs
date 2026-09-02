@@ -19,9 +19,19 @@ impl EmbeddingModel {
         mode: ExecutionMode,
         cuda_graph: bool,
     ) -> Result<Session, ort::Error> {
+        // bq-Meeting PoC ローカル改変（上流 PR #6 相当をCPUモードに限定して適用）:
+        // 埋め込みセッションが intra_threads(1) 固定でCPU経路が単一スレッドになっていた。
+        // CoreML経路は測定済みD4aの条件を変えないため従来どおり1のまま据え置く。
+        let intra_threads = if matches!(mode, ExecutionMode::Cpu) {
+            std::thread::available_parallelism()
+                .map(|count| count.get().min(6))
+                .unwrap_or(1)
+        } else {
+            1
+        };
         let builder = Session::builder()?
             .with_independent_thread_pool()?
-            .with_intra_threads(1)?
+            .with_intra_threads(intra_threads)?
             .with_inter_threads(1)?
             .with_memory_pattern(true)?;
         let mut builder =
