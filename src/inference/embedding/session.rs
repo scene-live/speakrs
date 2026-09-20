@@ -22,10 +22,14 @@ impl EmbeddingModel {
         // bq-Meeting PoC ローカル改変（上流 PR #6 相当をCPUモードに限定して適用）:
         // 埋め込みセッションが intra_threads(1) 固定でCPU経路が単一スレッドになっていた。
         // CoreML経路は測定済みD4aの条件を変えないため従来どおり1のまま据え置く。
+        // SPEAKRS_INTRA_THREADS が設定されていれば CPU モード限定でその値を使う
+        // （未設定・不正値は従来どおり available_parallelism().min(6)）。
         let intra_threads = if matches!(mode, ExecutionMode::Cpu) {
-            std::thread::available_parallelism()
-                .map(|count| count.get().min(6))
-                .unwrap_or(1)
+            crate::utils::intra_threads_override().unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|count| count.get().min(6))
+                    .unwrap_or(1)
+            })
         } else {
             1
         };

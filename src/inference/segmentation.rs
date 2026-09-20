@@ -215,9 +215,16 @@ impl SegmentationModel {
     }
 
     fn build_session(model_path: &Path, mode: ExecutionMode) -> Result<Session, ort::Error> {
+        // bq-Meeting PoC ローカル改変: CPU モードのみ SPEAKRS_INTRA_THREADS で上書き可能。
+        // 未設定・不正値・CPU以外は従来どおり available_threads().min(6)。
+        let intra_threads = if matches!(mode, ExecutionMode::Cpu) {
+            crate::utils::intra_threads_override().unwrap_or_else(|| Self::available_threads().min(6))
+        } else {
+            Self::available_threads().min(6)
+        };
         let builder = Session::builder()?
             .with_independent_thread_pool()?
-            .with_intra_threads(Self::available_threads().min(6))?
+            .with_intra_threads(intra_threads)?
             .with_inter_threads(1)?
             .with_memory_pattern(true)?;
         let mut builder = with_execution_mode(builder, mode)?;

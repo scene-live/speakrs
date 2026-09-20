@@ -94,6 +94,17 @@ macro_rules! pipeline_run_methods {
             self.runner().run_inference(audio)
         }
 
+        /// bq-Meeting PoC ローカル改変: `run_inference_only` で得た（あるいは
+        /// `InferenceArtifacts::concat` で連結した）artifacts に対して、クラスタリング
+        /// と再構成だけを実行する。モデルの再ロードなしに post-inference 単体を測るため。
+        pub fn run_post_inference(
+            &mut self,
+            artifacts: InferenceArtifacts,
+            config: &PipelineConfig,
+        ) -> Result<DiarizationResult, PipelineError> {
+            self.runner().run_post_inference(artifacts, config)
+        }
+
         /// Default pipeline config used by `run` and `run_batch`
         pub fn pipeline_config(&self) -> PipelineConfig {
             self.default_config.clone()
@@ -120,6 +131,12 @@ macro_rules! pipeline_run_methods {
         /// Segmentation step size in seconds for the current execution mode
         pub fn segmentation_step(&self) -> f64 {
             self.seg_model.step_seconds()
+        }
+
+        /// bq-Meeting PoC ローカル改変: segmentation のスライディング窓の長さ（秒）。
+        /// chunk 分割時のオーバーラップ幅（window - step）を呼び出し側で計算するために使う。
+        pub fn segmentation_window_seconds(&self) -> f64 {
+            self.seg_model.window_samples() as f64 / self.seg_model.sample_rate() as f64
         }
     };
 }
@@ -376,7 +393,9 @@ impl<'a> PipelineRunner<'a> {
         &mut self,
         audio: &[f32],
     ) -> Result<InferenceArtifacts, PipelineError> {
+        let segmentation_start = std::time::Instant::now();
         let raw_windows = RawSegmentationWindows(self.seg_model.run(audio)?);
+        let segmentation_ms = segmentation_start.elapsed().as_millis();
         debug!(windows = raw_windows.0.len(), "Segmentation complete");
 
         let segmentations = raw_windows.decode(self.powerset);
@@ -386,18 +405,23 @@ impl<'a> PipelineRunner<'a> {
             self.seg_model.window_samples(),
             segmentations.nchunks(),
         );
+        let embedding_start = std::time::Instant::now();
         let embeddings = segmentations.extract_embeddings(
             audio,
             self.emb_model,
             &layout,
             self.embedding_path(),
         )?;
+        let embedding_ms = embedding_start.elapsed().as_millis();
 
         debug!(
             chunks = segmentations.nchunks(),
             speakers = segmentations.num_speakers(),
             "Embeddings complete"
         );
+        // bq-Meeting PoC ローカル改変: 段別時間を計測ハーネス（speakrs-bench）から
+        // 追いやすくするための1行。
+        debug!(segmentation_ms, embedding_ms, "Inference stages");
 
         Ok(InferenceArtifacts {
             layout,

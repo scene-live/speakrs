@@ -1,5 +1,14 @@
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
+/// bq-Meeting PoC ローカル改変: `SPEAKRS_INTRA_THREADS`（1〜64の整数）で CPU 実行時の
+/// ONNX Runtime intra-op スレッド数を上書きするためのフック。未設定・不正値は `None`
+/// を返し、呼び出し側は既存の既定値をそのまま使う。読み取りをここ1か所にまとめる。
+pub(crate) fn intra_threads_override() -> Option<usize> {
+    let value = std::env::var("SPEAKRS_INTRA_THREADS").ok()?;
+    let parsed: usize = value.trim().parse().ok()?;
+    if (1..=64).contains(&parsed) { Some(parsed) } else { None }
+}
+
 pub fn l2_normalize(vector: &ArrayView1<f32>) -> Array1<f32> {
     let norm = vector.dot(vector).sqrt();
     if norm == 0.0 {

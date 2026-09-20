@@ -4,7 +4,7 @@ use ndarray::{Array2, Array3, s};
 
 use crate::powerset::PowersetMapping;
 
-use super::ChunkLayout;
+use super::{ChunkLayout, PipelineError};
 
 pub(in crate::pipeline) struct PendingEmbedding<'a> {
     pub chunk_idx: usize,
@@ -156,6 +156,85 @@ pub struct InferenceArtifacts {
     pub(in crate::pipeline) layout: ChunkLayout,
     pub(in crate::pipeline) segmentations: DecodedSegmentations,
     pub(in crate::pipeline) embeddings: ChunkEmbeddings,
+}
+
+impl InferenceArtifacts {
+    /// bq-Meeting PoC ローカル改変: chunk 分割で個別に走らせた `run_inference_only` の
+    /// 結果をチャンク軸（axis 0）で連結し、1回の `run_post_inference` に渡せる形にする。
+    /// `layout` は先頭パートの layout に `with_num_chunks(合計チャンク数)` を掛けたもの。
+    /// frames / speakers / embedding_dim の形状（axis 1, 2）が全パートで一致しない場合や
+    /// `parts` が空の場合はエラーを返す。
+    pub fn concat(parts: Vec<InferenceArtifacts>) -> Result<InferenceArtifacts, PipelineError> {
+        let mut parts = parts.into_iter();
+        let Some(first) = parts.next() else {
+            return Err(PipelineError::Invariant(
+                "InferenceArtifacts::concat: parts is empty".to_owned(),
+            ));
+        };
+
+        let seg_tail_shape = first.segmentations.0.shape()[1..].to_vec();
+        let emb_tail_shape = first.embeddings.0.shape()[1..].to_vec();
+
+        let mut total_chunks = first.segmentations.0.shape()[0];
+        let mut seg_arrays = vec![first.segmentations.0];
+        let mut emb_arrays = vec![first.embeddings.0];
+
+        for part in parts {
+            let part_seg_tail = part.segmentations.0.shape()[1..].to_vec();
+            let part_emb_tail = part.embeddings.0.shape()[1..].to_vec();
+            if part_seg_tail != seg_tail_shape || part_emb_tail != emb_tail_shape {
+                return Err(PipelineError::Invariant(format!(
+                    "InferenceArtifacts::concat: shape mismatch (segmentations {:?} vs {:?}, embeddings {:?} vs {:?})",
+                    part_seg_tail, seg_tail_shape, part_emb_tail, emb_tail_shape
+                )));
+            }
+            total_chunks += part.segmentations.0.shape()[0];
+            seg_arrays.push(part.segmentations.0);
+            emb_arrays.push(part.embeddings.0);
+        }
+
+        let seg_views: Vec<_> = seg_arrays.iter().map(|arr| arr.view()).collect();
+        let emb_views: Vec<_> = emb_arrays.iter().map(|arr| arr.view()).collect();
+
+        let segmentations = ndarray::concatenate(ndarray::Axis(0), &seg_views).map_err(|err| {
+            PipelineError::Invariant(format!(
+                "InferenceArtifacts::concat: segmentations concat failed: {err}"
+            ))
+        })?;
+        let embeddings = ndarray::concatenate(ndarray::Axis(0), &emb_views).map_err(|err| {
+            PipelineError::Invariant(format!(
+                "InferenceArtifacts::concat: embeddings concat failed: {err}"
+            ))
+        })?;
+
+        let layout = first.layout.with_num_chunks(total_chunks);
+
+        Ok(InferenceArtifacts {
+            layout,
+            segmentations: DecodedSegmentations(segmentations),
+            embeddings: ChunkEmbeddings(embeddings),
+        })
+    }
+
+    /// bq-Meeting PoC ローカル改変: chunk 分割で重なり（オーバーラップ）を持たせて
+    /// `run_inference_only` した結果から、末尾の余剰 window（オーバーラップ分・末尾の
+    /// ゼロ詰め window）を切り落とす。axis 0（チャンク軸）の先頭 `num_chunks` 個だけを残す
+    /// （segmentations・embeddings 両方）。`num_chunks` が現在のチャンク数以上なら、
+    /// 実質的にそのまま返す（`with_num_chunks` の再計算だけが起きる）。
+    pub fn truncate_chunks(self, num_chunks: usize) -> InferenceArtifacts {
+        let current_chunks = self.segmentations.0.shape()[0];
+        let keep = num_chunks.min(current_chunks);
+
+        let segmentations = self.segmentations.0.slice(s![0..keep, .., ..]).to_owned();
+        let embeddings = self.embeddings.0.slice(s![0..keep, .., ..]).to_owned();
+        let layout = self.layout.with_num_chunks(keep);
+
+        InferenceArtifacts {
+            layout,
+            segmentations: DecodedSegmentations(segmentations),
+            embeddings: ChunkEmbeddings(embeddings),
+        }
+    }
 }
 
 /// Complete output from a diarization run
