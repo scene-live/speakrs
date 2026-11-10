@@ -257,9 +257,9 @@ impl<'a> ParallelBatchExecutor<'a> {
         profile: &ParallelProfile,
         worker_error: &WorkerErrorSlot,
     ) {
-        rayon::scope(|rscope| {
+        let worker_count = tasks.len().min(num_workers.max(1));
+        super::worker_scope(worker_count, |rscope| {
             let next_task = Arc::new(AtomicUsize::new(0));
-            let worker_count = tasks.len().min(num_workers.max(1));
 
             for _worker_idx in 0..worker_count {
                 let worker = BatchWorker {

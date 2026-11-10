@@ -177,7 +177,7 @@ struct SingleWorkerPool<'ctx, 'a> {
 
 impl<'ctx, 'a> SingleWorkerPool<'ctx, 'a> {
     fn run(&self, worker_txs: Vec<WorkerTx>) {
-        rayon::scope(|rscope| {
+        super::worker_scope(worker_txs.len(), |rscope| {
             for (worker_idx, worker_tx) in worker_txs.into_iter().enumerate() {
                 let worker = self.worker(worker_idx, worker_tx);
                 rscope.spawn(move |_| worker.run());
