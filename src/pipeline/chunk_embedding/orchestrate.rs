@@ -13,6 +13,15 @@ use super::{
 type ChunkEmbeddingSetup = (usize, usize, bool, Option<ChunkEmbeddingResources>);
 
 pub(super) fn seg_worker_count() -> usize {
+    // bq-Meeting ローカル改変: SPEAKRS_SEG_WORKERS（1〜8）で同時に走らせるセグメンテーション本数を絞る。
+    // 同時本数がそのまま CoreML の GPU 側確保量になるため、ピークメモリを下げる用途。範囲外・不正値は既定に戻す。
+    if let Some(n) = std::env::var("SPEAKRS_SEG_WORKERS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|n| (1..=8).contains(n))
+    {
+        return n;
+    }
     std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(4)

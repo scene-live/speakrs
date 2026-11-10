@@ -301,3 +301,20 @@ impl SegmentationModel {
         Ok(total_windows)
     }
 }
+
+// Blocking channel users must have enough Rayon threads to run every worker.
+// Keep the existing pool when it is large enough, including the default path.
+fn worker_scope<'scope, OP>(num_workers: usize, op: OP)
+where
+    OP: FnOnce(&rayon::Scope<'scope>) + Send,
+{
+    if rayon::current_num_threads() >= num_workers {
+        rayon::scope(op);
+    } else {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_workers)
+            .build()
+            .expect("failed to build segmentation worker pool")
+            .scope(op);
+    }
+}
